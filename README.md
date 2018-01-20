@@ -14,3 +14,6 @@ http://server/epg_js?aux_id=[auxid1999]&now=[unix timestamp]&limit=1
 archive or feature 
 
 http://server/epg_js?aux_id=[auxid19999]&start=[unix timestamp]&end=[unix timestamp]
+
+
+kill -hup [pid] - to import file
