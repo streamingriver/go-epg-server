@@ -28,11 +28,11 @@ const VERSION = `0.1`
 
 const usage = `
 Usage:
-    rb-epg-json --config=<config> [--debug-sql] [now]
+    go-epg-json --config=<config> [--debug-sql] [now]
 
 Options:
     -h --help           Show this screen
-    --config=<config>   Config file [default: /etc/rb-epg-json.ini]
+    --config=<config>   Config file [default: /etc/go-epg-json.ini]
     --debug-sql         Log quries [default: false]
 `
 
