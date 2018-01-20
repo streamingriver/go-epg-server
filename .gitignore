@@ -1,0 +1,6 @@
+rb-epg-json
+rb-epg-server
+config.ini
+config.ini.default
+*.xml
+*.db
