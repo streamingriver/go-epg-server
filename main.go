@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/blevesearch/bleve"
-	"github.com/blevesearch/bleve/mapping"
 	"github.com/boltdb/bolt"
 	"github.com/docopt/docopt-go"
 	"github.com/gorilla/mux"
@@ -44,7 +43,6 @@ func init() {
 }
 
 var db *bolt.DB
-var blv mapping.IndexMappingImpl
 var blvidx bleve.Index
 
 func main() {
@@ -267,19 +265,26 @@ func CurrentDB() string {
 func ImportXML() error {
 	log.Println("Starting ImportXML")
 	var err error
+	/*
+		err = blvidx.Close()
 
-	blv := bleve.NewIndexMapping()
-	idx := cfg.Section("").Key("index").MustString("./index.bleve")
+		if err != nil {
+			println(err.Error())
+		}
+		idx := cfg.Section("").Key("index").MustString("./index.bleve")
 
-	err = os.RemoveAll(idx)
-	if err != nil {
-		panic(err)
-	}
+		err = os.RemoveAll(idx)
+		if err != nil {
+			panic(err)
+		}
 
-	blvidx, err = bleve.New(idx, blv)
-	if err != nil {
-		blvidx, _ = bleve.Open(idx)
-	}
+		blvidx, err = bleve.Open(idx)
+		if err != nil {
+			println(err.Error())
+			blv := bleve.NewIndexMapping()
+			blvidx, _ = bleve.New(idx, blv)
+		}
+	*/
 
 	var xmlPrograms vProgramsQuery
 	field := []byte("db-name")
@@ -346,11 +351,15 @@ func ImportXML() error {
 		prog.Title = program.Title
 		prog.Description = program.Description
 
+		var sp SearchProgram
+		sp.Title = prog.Title
+		sp.Description = prog.Description
+
 		var s string
 		s = string(_key) + ":" + program.ChannelId + ":" + program.Title
 		_ = s
 
-		batch.Index(s, prog)
+		batch.Index(s, sp)
 
 		_value, _ := json.Marshal(prog)
 
@@ -359,10 +368,18 @@ func ImportXML() error {
 		n++
 		if n%10000 == 0 {
 			log.Printf("Progress... %v", n)
+			err = blvidx.Batch(batch)
+			batch = blvidx.NewBatch()
+			if err != nil {
+				log.Printf("%v", err)
+
+			}
+			// batch = blvidx.NewBatch()
 			trx.Commit()
 			trx, _ = db.Begin(true)
 		}
 	}
+	blvidx.Batch(batch)
 	trx.Commit()
 
 	log.Println("Switching database to ", string(current))
@@ -421,4 +438,9 @@ type vProgram struct {
 	Date        string    `xml:"date"`
 	Description string    `xml:"desc"`
 	Genre       string    `xml:"genre"`
+}
+
+type SearchProgram struct {
+	Title       string
+	Description string
 }
