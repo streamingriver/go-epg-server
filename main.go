@@ -265,26 +265,25 @@ func CurrentDB() string {
 func ImportXML() error {
 	log.Println("Starting ImportXML")
 	var err error
-	/*
-		err = blvidx.Close()
 
-		if err != nil {
-			println(err.Error())
-		}
-		idx := cfg.Section("").Key("index").MustString("./index.bleve")
+	err = blvidx.Close()
 
-		err = os.RemoveAll(idx)
-		if err != nil {
-			panic(err)
-		}
+	if err != nil {
+		println(err.Error())
+	}
+	idx := cfg.Section("").Key("index").MustString("./index.bleve")
 
-		blvidx, err = bleve.Open(idx)
-		if err != nil {
-			println(err.Error())
-			blv := bleve.NewIndexMapping()
-			blvidx, _ = bleve.New(idx, blv)
-		}
-	*/
+	err = os.RemoveAll(idx)
+	if err != nil {
+		panic(err)
+	}
+
+	blvidx, err = bleve.Open(idx)
+	if err != nil {
+		println(err.Error())
+		blv := bleve.NewIndexMapping()
+		blvidx, _ = bleve.New(idx, blv)
+	}
 
 	var xmlPrograms vProgramsQuery
 	field := []byte("db-name")
@@ -359,7 +358,7 @@ func ImportXML() error {
 		s = string(_key) + ":" + program.ChannelId + ":" + program.Title
 		_ = s
 
-		batch.Index(s, sp)
+		batch.Index(s, sp.Title)
 
 		_value, _ := json.Marshal(prog)
 
