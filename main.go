@@ -6,11 +6,6 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
-	"github.com/boltdb/bolt"
-	"github.com/docopt/docopt-go"
-	"github.com/gorilla/mux"
-	"github.com/pkg/errors"
-	"gopkg.in/ini.v1"
 	"log"
 	"net/http"
 	"os"
@@ -20,6 +15,14 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/blevesearch/bleve"
+	"github.com/blevesearch/bleve/mapping"
+	"github.com/boltdb/bolt"
+	"github.com/docopt/docopt-go"
+	"github.com/gorilla/mux"
+	"github.com/pkg/errors"
+	"gopkg.in/ini.v1"
 )
 
 var cfg *ini.File
@@ -41,6 +44,8 @@ func init() {
 }
 
 var db *bolt.DB
+var blv mapping.IndexMappingImpl
+var blvidx bleve.Index
 
 func main() {
 
@@ -60,9 +65,17 @@ func main() {
 
 	cfg, _ = ini.Load(args["--config"])
 
+	// blvidx, _ = bleve.NewMemOnly(bleve.NewIndexMapping())
+
 	v := cfg.Section("").Key("db").String()
 	var err error
 	_, _ = v, err
+	blv := bleve.NewIndexMapping()
+	idx := cfg.Section("").Key("index").MustString("./index.bleve")
+	blvidx, err = bleve.New(idx, blv)
+	if err != nil {
+		blvidx, _ = bleve.Open(idx)
+	}
 
 	db, err = bolt.Open(v, 0600, nil)
 	if err != nil {
@@ -80,10 +93,41 @@ func main() {
 	router := mux.NewRouter()
 	router.HandleFunc("/epg_js", HandleEpg)
 
+	router.HandleFunc("/search", SearchHandler)
+
 	router.HandleFunc("/_health", HealthHandler)
 
 	l := cfg.Section("").Key("listen").String()
 	http.ListenAndServe(l, router)
+
+}
+
+func SearchHandler(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	dbName := CurrentDB()
+	_ = dbName
+	query := bleve.NewMatchQuery(q)
+	search := bleve.NewSearchRequest(query)
+	results, _ := blvidx.Search(search)
+
+	response := Programs{}
+
+	for _, result := range results.Hits {
+		parts := strings.Split(result.ID, ":")
+		_key := []byte(parts[0])
+		_bucket := []byte(parts[1])
+		db.View(func(tx *bolt.Tx) error {
+			rootBucket := tx.Bucket([]byte(dbName))
+			bucket := rootBucket.Bucket(_bucket)
+			b := bucket.Get(_key)
+			var p Program
+			json.Unmarshal(b, &p)
+			response = append(response, p)
+			return nil
+		})
+
+	}
+	json.NewEncoder(w).Encode(response)
 
 }
 
@@ -140,7 +184,7 @@ func HandleEpg(w http.ResponseWriter, r *http.Request) {
 	} else {
 		now := r.URL.Query().Get("now")
 		var program Program
-		db.View(func(tx *bolt.Tx) error {
+		err := db.View(func(tx *bolt.Tx) error {
 			bucket := tx.Bucket([]byte(dbName)).Bucket([]byte(aux_id))
 
 			_ = bucket
@@ -158,7 +202,9 @@ func HandleEpg(w http.ResponseWriter, r *http.Request) {
 			json.Unmarshal(v, &program)
 			return nil
 		})
-
+		if err != nil {
+			log.Printf("%v", err)
+		}
 		_ = now
 		w.Write(encode(program))
 	}
@@ -177,10 +223,10 @@ type Program struct {
 	End             int    `json:"end"`
 	Start           int    `json:"start"`
 	Description     string `json:"descr"`
-	PrId            int    `json:"pr_id"`
+	PrId            string `json:"pr_id"`
 	DescriptionLang string `json:"descr_l"`
 	CategoryId      int    `json:"cat_id"`
-	AuxId           int    `json:"aux_id"`
+	AuxId           string `json:"aux_id"`
 	Icon            string `json:"icon"`
 }
 
@@ -220,9 +266,22 @@ func CurrentDB() string {
 
 func ImportXML() error {
 	log.Println("Starting ImportXML")
+	var err error
+
+	blv := bleve.NewIndexMapping()
+	idx := cfg.Section("").Key("index").MustString("./index.bleve")
+
+	err = os.RemoveAll(idx)
+	if err != nil {
+		panic(err)
+	}
+
+	blvidx, err = bleve.New(idx, blv)
+	if err != nil {
+		blvidx, _ = bleve.Open(idx)
+	}
 
 	var xmlPrograms vProgramsQuery
-	var err error
 	field := []byte("db-name")
 	current := []byte("")
 
@@ -272,6 +331,7 @@ func ImportXML() error {
 	}
 
 	trx, _ := db.Begin(true)
+	batch := blvidx.NewBatch()
 	n := 0
 	for _, program := range xmlPrograms.Programs {
 		rootBucket, _ := trx.CreateBucketIfNotExists(current)
@@ -280,11 +340,17 @@ func ImportXML() error {
 		_key := itob(int(program.Start.Unix()))
 
 		var prog Program
-		prog.AuxId, _ = strconv.Atoi(program.ChannelId)
+		prog.AuxId = program.ChannelId
 		prog.Start = int(program.Start.Unix())
 		prog.End = int(program.Stop.Unix())
 		prog.Title = program.Title
 		prog.Description = program.Description
+
+		var s string
+		s = string(_key) + ":" + program.ChannelId + ":" + program.Title
+		_ = s
+
+		batch.Index(s, prog)
 
 		_value, _ := json.Marshal(prog)
 
@@ -292,6 +358,7 @@ func ImportXML() error {
 
 		n++
 		if n%10000 == 0 {
+			log.Printf("Progress... %v", n)
 			trx.Commit()
 			trx, _ = db.Begin(true)
 		}

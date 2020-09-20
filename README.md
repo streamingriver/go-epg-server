@@ -5,6 +5,7 @@ config.ini
 listen = :8080 ; listen address
 db = /path/to/file.db
 xml = /path/to/xmltv.xml
+index = /path/to/index.bleve
 ```
 
 current program:
