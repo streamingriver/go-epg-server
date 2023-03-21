@@ -515,7 +515,7 @@ func AllChannelsShortEpg(w http.ResponseWriter, r *http.Request) {
 		var program ProgramEvent
 		var programShort ProgramShort
 		programShort.ChannelID = aux_id
-		log.Printf("%v", aux_id)
+		// log.Printf("%v", aux_id)
 		err := db.View(func(tx *bolt.Tx) error {
 			bucket := tx.Bucket([]byte(dbName)).Bucket([]byte(aux_id))
 
