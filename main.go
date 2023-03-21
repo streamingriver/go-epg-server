@@ -501,13 +501,18 @@ func AllChannelsShortEpg(w http.ResponseWriter, r *http.Request) {
 
 	var auxIDS []string
 
-	db.View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(dbName))
-		return bucket.ForEach(func(name []byte, _ []byte) error {
-			auxIDS = append(auxIDS, string(name))
-			return nil
+	_inputAUX := r.URL.Query().Get("aux_ids")
+	auxIDS = strings.Split(_inputAUX, ",")
+	if len(_inputAUX) == 0 {
+		auxIDS = []string{}
+		db.View(func(tx *bolt.Tx) error {
+			bucket := tx.Bucket([]byte(dbName))
+			return bucket.ForEach(func(name []byte, _ []byte) error {
+				auxIDS = append(auxIDS, string(name))
+				return nil
+			})
 		})
-	})
+	}
 
 	var programs []ProgramShort
 	for _, aux_id := range auxIDS {
