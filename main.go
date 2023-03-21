@@ -89,14 +89,33 @@ func main() {
 	log.Printf("Using with '%s' db", dbName)
 
 	router := mux.NewRouter()
+	router.HandleFunc("/short-epg.json", AllChannelsShortEpg)
+
 	router.HandleFunc("/epg_js", HandleEpg)
 
 	router.HandleFunc("/search", SearchHandler)
 
 	router.HandleFunc("/_health", HealthHandler)
 
+	router.HandleFunc("/tv/tvip/tvipapi/json/epg/{auxID}/{date}.json", func(w http.ResponseWriter, r *http.Request) {
+
+	})
+	router.HandleFunc("/tv/tvip/tvipapi/json/short_epg/{token}.json", func(w http.ResponseWriter, r *http.Request) {
+
+	})
+
+	router.HandleFunc("/ep/epg/{auxID}/epg/pf.json", func(w http.ResponseWriter, r *http.Request) {
+		// strip 4 numbers from beggining
+	})
+	router.HandleFunc("/ep/epg/{auxID}/epg/day.json", func(w http.ResponseWriter, r *http.Request) {
+		// strip 4 numbers from beggining
+	})
+	router.HandleFunc("/ep/epg/{auxID}/epg/archive.json", func(w http.ResponseWriter, r *http.Request) {
+		// strip 4 numbers from beggining
+	})
+
 	l := cfg.Section("").Key("listen").String()
-	http.ListenAndServe(l, router)
+	log.Fatal(http.ListenAndServe(l, router))
 
 }
 
@@ -241,6 +260,9 @@ func getClientIp(r *http.Request) string {
 	}
 	if r.Header.Get("X-Forwarded-for") != "" {
 		remote_addr = r.Header.Get("X-Forwarded-for")
+	}
+	if r.Header.Get("X-Real-IP") != "" && remote_addr == "127.0.0.1" {
+		remote_addr = r.Header.Get("X-Real-IP")
 	}
 	return remote_addr
 }
@@ -442,4 +464,106 @@ type vProgram struct {
 type SearchProgram struct {
 	Title       string
 	Description string
+}
+
+type ProgramEvent struct {
+	Start        int     `json:"start"`
+	End          int     `json:"end"`
+	Title        string  `json:"title"`
+	Description  string  `json:"description"`
+	age_group_id *string `json:"age_group_id"`
+}
+
+type ProgramShort struct {
+	ChannelID string `json:"channel_id"`
+	Events    []ProgramEvent
+}
+
+type Response struct {
+	Method   string      `json:"method"`
+	Status   int         `json:"status"`
+	Text     *string     `json:"text"`
+	Response interface{} `json:"response"`
+}
+
+type Channels struct {
+	Version  int64          `json:"version"`
+	Channels []ProgramShort `json:"channels"`
+}
+
+func AllChannelsShortEpg(w http.ResponseWriter, r *http.Request) {
+	ip := getClientIp(r)
+	log.Printf("[%s] %s", ip, r.URL.String())
+
+	dbName := CurrentDB()
+	_ = dbName
+	now := fmt.Sprintf("%d", time.Now().Unix())
+
+	var auxIDS []string
+
+	db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(dbName))
+		return bucket.ForEach(func(name []byte, _ []byte) error {
+			auxIDS = append(auxIDS, string(name))
+			return nil
+		})
+	})
+
+	var programs []ProgramShort
+	for _, aux_id := range auxIDS {
+
+		var program ProgramEvent
+		var programShort ProgramShort
+		programShort.ChannelID = aux_id
+		log.Printf("%v", aux_id)
+		err := db.View(func(tx *bolt.Tx) error {
+			bucket := tx.Bucket([]byte(dbName)).Bucket([]byte(aux_id))
+
+			_ = bucket
+			if bucket == nil {
+				return errors.New("Bucket doesnt exists, " + aux_id)
+			}
+			c := bucket.Cursor()
+			tnow, _ := strconv.Atoi(now)
+
+			k, v := c.Seek(itob(int(tnow)))
+			if !bytes.Equal(k, []byte(now)) {
+				k, v = c.Prev()
+			}
+			k, v = c.Prev()
+			_ = v
+			json.Unmarshal(v, &program)
+			programShort.Events = append(programShort.Events, program)
+
+			k, v = c.Next()
+			_ = v
+			json.Unmarshal(v, &program)
+			programShort.Events = append(programShort.Events, program)
+
+			k, v = c.Next()
+			_ = v
+			json.Unmarshal(v, &program)
+			programShort.Events = append(programShort.Events, program)
+
+			return nil
+		})
+		programs = append(programs, programShort)
+		if err != nil {
+			log.Printf("%v", err)
+		}
+	}
+	_ = now
+
+	resp := Response{
+		Method: "short_epg",
+		Status: 200,
+		Response: Channels{
+			Version:  time.Now().Unix(),
+			Channels: programs,
+		},
+	}
+
+	// w.Write(encode(programs))
+	w.Write(encode(resp))
+
 }
