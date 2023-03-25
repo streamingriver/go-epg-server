@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -44,6 +45,8 @@ func init() {
 
 var db *bolt.DB
 var blvidx bleve.Index
+var xmlURL string = ""
+var xmlFile string
 
 func main() {
 
@@ -62,6 +65,9 @@ func main() {
 	args, _ := docopt.Parse(usage, nil, true, VERSION, true)
 
 	cfg, _ = ini.Load(args["--config"])
+
+	xmlFile = cfg.Section("").Key("xml").String()
+	xmlURL = cfg.Section("").Key("url").String()
 
 	// blvidx, _ = bleve.NewMemOnly(bleve.NewIndexMapping())
 
@@ -114,6 +120,18 @@ func main() {
 		// strip 4 numbers from beggining
 	})
 
+	router.HandleFunc("/-/reload", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Token") != cfg.Section("").Key("token").String() {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		go func() {
+			ImportXML()
+		}()
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+
 	l := cfg.Section("").Key("listen").String()
 	log.Fatal(http.ListenAndServe(l, router))
 
@@ -149,6 +167,7 @@ func SearchHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func HealthHandler(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
 }
 
@@ -285,6 +304,15 @@ func CurrentDB() string {
 }
 
 func ImportXML() error {
+	log.Printf("%v", xmlURL)
+	if xmlURL != "" {
+		log.Println("Downloading XML")
+		err := fetchXML()
+		if err != nil {
+			return err
+		}
+	}
+
 	log.Println("Starting ImportXML")
 	var err error
 
@@ -311,7 +339,15 @@ func ImportXML() error {
 	field := []byte("db-name")
 	current := []byte("")
 
-	xmlFile := cfg.Section("").Key("xml").String()
+	fi, err := os.Stat(xmlFile)
+	if err != nil {
+		log.Printf("XML file doesnt exists, downloading from %s", xmlURL)
+		err = fetchXML()
+		if err != nil {
+			log.Fatalf("XML download error: %v", err)
+		}
+	}
+	_ = fi
 
 	log.Println("ImportXML opening xml file")
 	file, err := os.Open(xmlFile)
@@ -570,5 +606,30 @@ func AllChannelsShortEpg(w http.ResponseWriter, r *http.Request) {
 
 	// w.Write(encode(programs))
 	w.Write(encode(resp))
+
+}
+
+func fetchXML() error {
+	if xmlURL == "" {
+		return errors.New("xmlURL is empty")
+	}
+	request, _ := http.NewRequest("GET", xmlURL, nil)
+
+	client := &http.Client{}
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	fh, err := os.Create(xmlFile)
+	if err != nil {
+		return err
+	}
+	defer fh.Close()
+	_, err = io.Copy(fh, response.Body)
+	if err != nil {
+		return err
+	}
+	return nil
 
 }
